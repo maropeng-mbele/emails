@@ -101,52 +101,101 @@ class StreamlitEmailComposer:
                 st.image(img, caption=f"Click to copy ID: [{image_id}]", width=150)
     
     def find_browser(self):
-        """Find an available browser for OAuth authentication."""
-        # Try common browser locations based on OS
+        """Enhanced browser detection with fallback options."""
         system = platform.system().lower()
         
-        if system == 'windows':
-            browsers = [
-                r'C:\Program Files\Google\Chrome\Application\chrome.exe',
-                r'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
-                r'C:\Program Files\Mozilla Firefox\firefox.exe',
-                r'C:\Program Files (x86)\Mozilla Firefox\firefox.exe',
-                r'C:\Program Files\Microsoft\Edge\Application\msedge.exe',
-                r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
-            ]
-        elif system == 'darwin':  # macOS
-            browsers = [
-                '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-                '/Applications/Firefox.app/Contents/MacOS/firefox',
-                '/Applications/Safari.app/Contents/MacOS/Safari'
-            ]
-        else:  # Linux and others
-            browsers = [
-                'google-chrome',
-                'chrome',
-                'chromium',
-                'firefox',
-                'mozilla'
-            ]
+        # First try webbrowser module's default browser
+        try:
+            if webbrowser.get():
+                return 'default'
+        except:
+            pass
 
-        # Try to find an available browser
-        for browser in browsers:
-            if system != 'windows' and system != 'darwin':
-                # On Linux, check if the command exists
-                try:
-                    subprocess.run(['which', browser], capture_output=True, check=True)
-                    return browser
-                except subprocess.CalledProcessError:
-                    continue
-            else:
-                # On Windows and macOS, check if the file exists
-                if os.path.exists(browser):
-                    return browser
-        
+        # System-specific browser paths
+        if system == 'windows':
+            browsers = {
+                'chrome': [
+                    r'C:\Program Files\Google\Chrome\Application\chrome.exe',
+                    r'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
+                ],
+                'firefox': [
+                    r'C:\Program Files\Mozilla Firefox\firefox.exe',
+                    r'C:\Program Files (x86)\Mozilla Firefox\firefox.exe',
+                ],
+                'edge': [
+                    r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
+                    r'C:\Program Files\Microsoft\Edge\Application\msedge.exe',
+                ]
+            }
+            
+            # Check Windows Registry for browser paths
+            try:
+                import winreg
+                for browser in ['chrome', 'firefox', 'edge']:
+                    try:
+                        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, 
+                                          rf'SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{browser}.exe') as key:
+                            path = winreg.QueryValue(key, None)
+                            if os.path.exists(path):
+                                return path
+                    except:
+                        continue
+            except:
+                pass
+
+        elif system == 'darwin':  # macOS
+            browsers = {
+                'chrome': [
+                    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+                    '~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+                ],
+                'firefox': [
+                    '/Applications/Firefox.app/Contents/MacOS/firefox',
+                    '~/Applications/Firefox.app/Contents/MacOS/firefox'
+                ],
+                'safari': [
+                    '/Applications/Safari.app/Contents/MacOS/Safari'
+                ]
+            }
+        else:  # Linux
+            browsers = {
+                'chrome': ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser'],
+                'firefox': ['firefox', 'firefox-esr'],
+                'edge': ['microsoft-edge']
+            }
+
+        # Try finding browsers based on system
+        if system in ['darwin', 'windows']:
+            for browser_paths in browsers.values():
+                for path in browser_paths:
+                    expanded_path = os.path.expanduser(path)
+                    if os.path.exists(expanded_path):
+                        return expanded_path
+        else:  # Linux and others
+            for browser_cmds in browsers.values():
+                for cmd in browser_cmds:
+                    try:
+                        browser_path = subprocess.check_output(['which', cmd], 
+                                                            stderr=subprocess.STDOUT).decode().strip()
+                        if browser_path:
+                            return browser_path
+                    except:
+                        continue
+
+        # Final fallback: try xdg-open on Linux
+        if system == 'linux':
+            try:
+                xdg_path = subprocess.check_output(['which', 'xdg-open'], 
+                                                stderr=subprocess.STDOUT).decode().strip()
+                if xdg_path:
+                    return xdg_path
+            except:
+                pass
+
         return None
 
     def authenticate_gmail(self):
-        """Enhanced Gmail authentication with better browser handling."""
+        """Enhanced Gmail authentication with improved browser handling."""
         try:
             creds = None
             if os.path.exists('token.json'):
@@ -167,19 +216,28 @@ class StreamlitEmailComposer:
                     try:
                         # Find available browser
                         browser_path = self.find_browser()
-                        if not browser_path:
-                            raise RuntimeError("No suitable browser found. Please ensure Chrome, Firefox, or Edge is installed.")
-
-                        # Create a custom browser opener
+                        
                         def browser_opener(url):
                             try:
-                                if platform.system().lower() != 'windows':
+                                if browser_path == 'default':
+                                    webbrowser.open(url)
+                                elif platform.system().lower() == 'linux' and 'xdg-open' in browser_path:
+                                    subprocess.run(['xdg-open', url])
+                                elif platform.system().lower() != 'windows':
                                     subprocess.run([browser_path, url])
                                 else:
                                     subprocess.run([browser_path, url], shell=True)
+                                
+                                st.info(f"""
+                                If a browser window didn't open automatically, please manually copy and paste this URL:
+                                {url}
+                                """)
                             except Exception as e:
-                                st.error(f"Failed to open browser: {str(e)}")
-                                st.info(f"Please manually open this URL in your browser: {url}")
+                                st.error(f"Failed to open browser automatically: {str(e)}")
+                                st.info(f"""
+                                Please manually copy and paste this URL in your browser:
+                                {url}
+                                """)
 
                         # Configure the flow with the custom browser opener
                         flow = InstalledAppFlow.from_client_secrets_file(
@@ -187,6 +245,8 @@ class StreamlitEmailComposer:
                             self.SCOPES,
                             redirect_uri='http://localhost:0'
                         )
+                        
+                        # Try to run the local server with increased timeout
                         flow.run_local_server(
                             port=0,
                             browser_opener=browser_opener,
@@ -206,7 +266,13 @@ class StreamlitEmailComposer:
 
         except Exception as e:
             st.error(f"Authentication failed: {str(e)}")
-            st.info("If the browser didn't open automatically, please check if you have a web browser installed and try again.")
+            st.info("""
+            If you're having trouble with authentication:
+            1. Make sure you have a web browser installed
+            2. Try clearing your browser cache and cookies
+            3. Check if you have a working internet connection
+            4. Ensure you're using a supported browser (Chrome, Firefox, Edge, or Safari)
+            """)
             raise
     
     def create_message_with_attachments(self, to, html_content, image_paths, subject):
