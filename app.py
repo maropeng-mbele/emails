@@ -106,13 +106,24 @@ class StreamlitEmailComposer:
             else:
                 # Get client config from secrets
                 client_config = json.loads(st.secrets["google"]["client_config"])
-                flow = InstalledAppFlow.from_client_secrets_file_dict(
-                    client_config, 
-                    self.SCOPES
-                )
-                creds = flow.run_local_server(port=0)
-            # Store token in session state
-            st.session_state.token = json.loads(creds.to_json())
+                
+                # Create a temporary file to store the client config
+                with tempfile.NamedTemporaryFile(mode='w', delete=False) as config_file:
+                    json.dump(client_config, config_file)
+                    config_file_path = config_file.name
+                
+                try:
+                    flow = InstalledAppFlow.from_client_secrets_file(
+                        config_file_path,
+                        self.SCOPES
+                    )
+                    creds = flow.run_local_server(port=0)
+                finally:
+                    # Clean up the temporary file
+                    os.unlink(config_file_path)
+                    
+                # Store token in session state
+                st.session_state.token = json.loads(creds.to_json())
         return creds
     
     def create_message_with_attachments(self, to, html_content, image_paths, subject):
