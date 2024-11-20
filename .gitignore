@@ -1,0 +1,20 @@
+# Sensitive files
+client_secret.json
+token.json
+list.csv
+image_mappings.json
+weekly_digest.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+env/
+venv/
+ENV/
+
+# System files
+.DS_Store
+Thumbs.db
