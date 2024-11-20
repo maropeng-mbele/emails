@@ -98,32 +98,27 @@ class StreamlitEmailComposer:
     
     def authenticate_gmail(self):
         creds = None
-        if 'token' in st.session_state:
-            creds = Credentials.from_authorized_user_info(st.session_state.token, self.SCOPES)
+        if os.path.exists('token.json'):
+            creds = Credentials.from_authorized_user_file('token.json', self.SCOPES)
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
             else:
-                # Get client config from secrets
+                # Get client config from secrets and save to temporary file
                 client_config = json.loads(st.secrets["google"]["client_config"])
-                
-                # Create a temporary file to store the client config
-                with tempfile.NamedTemporaryFile(mode='w', delete=False) as config_file:
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as config_file:
                     json.dump(client_config, config_file)
                     config_file_path = config_file.name
                 
                 try:
-                    flow = InstalledAppFlow.from_client_secrets_file(
-                        config_file_path,
-                        self.SCOPES
-                    )
+                    flow = InstalledAppFlow.from_client_secrets_file(config_file_path, self.SCOPES)
                     creds = flow.run_local_server(port=0)
+                    # Save the token to file
+                    with open('token.json', 'w') as token:
+                        token.write(creds.to_json())
                 finally:
-                    # Clean up the temporary file
+                    # Clean up temporary config file
                     os.unlink(config_file_path)
-                    
-                # Store token in session state
-                st.session_state.token = json.loads(creds.to_json())
         return creds
     
     def create_message_with_attachments(self, to, html_content, image_paths, subject):
