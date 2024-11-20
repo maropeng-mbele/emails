@@ -96,30 +96,114 @@ class StreamlitEmailComposer:
                 img = Image.open(image_path)
                 st.image(img, caption=f"Click to copy ID: [{image_id}]", width=150)
     
-    def authenticate_gmail(self):
-        creds = None
-        if os.path.exists('token.json'):
-            creds = Credentials.from_authorized_user_file('token.json', self.SCOPES)
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                # Get client config from secrets and save to temporary file
-                client_config = json.loads(st.secrets["google"]["client_config"])
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as config_file:
-                    json.dump(client_config, config_file)
-                    config_file_path = config_file.name
-                
+    def find_browser(self):
+        """Find an available browser for OAuth authentication."""
+        # Try common browser locations based on OS
+        system = platform.system().lower()
+        
+        if system == 'windows':
+            browsers = [
+                r'C:\Program Files\Google\Chrome\Application\chrome.exe',
+                r'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
+                r'C:\Program Files\Mozilla Firefox\firefox.exe',
+                r'C:\Program Files (x86)\Mozilla Firefox\firefox.exe',
+                r'C:\Program Files\Microsoft\Edge\Application\msedge.exe',
+                r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
+            ]
+        elif system == 'darwin':  # macOS
+            browsers = [
+                '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+                '/Applications/Firefox.app/Contents/MacOS/firefox',
+                '/Applications/Safari.app/Contents/MacOS/Safari'
+            ]
+        else:  # Linux and others
+            browsers = [
+                'google-chrome',
+                'chrome',
+                'chromium',
+                'firefox',
+                'mozilla'
+            ]
+
+        # Try to find an available browser
+        for browser in browsers:
+            if system != 'windows' and system != 'darwin':
+                # On Linux, check if the command exists
                 try:
-                    flow = InstalledAppFlow.from_client_secrets_file(config_file_path, self.SCOPES)
-                    creds = flow.run_local_server(port=0)
-                    # Save the token to file
-                    with open('token.json', 'w') as token:
-                        token.write(creds.to_json())
-                finally:
-                    # Clean up temporary config file
-                    os.unlink(config_file_path)
-        return creds
+                    subprocess.run(['which', browser], capture_output=True, check=True)
+                    return browser
+                except subprocess.CalledProcessError:
+                    continue
+            else:
+                # On Windows and macOS, check if the file exists
+                if os.path.exists(browser):
+                    return browser
+        
+        return None
+
+    def authenticate_gmail(self):
+        """Enhanced Gmail authentication with better browser handling."""
+        try:
+            creds = None
+            if os.path.exists('token.json'):
+                creds = Credentials.from_authorized_user_file('token.json', self.SCOPES)
+            
+            if not creds or not creds.valid:
+                if creds and creds.expired and creds.refresh_token:
+                    creds.refresh(Request())
+                else:
+                    # Get client config from secrets
+                    client_config = json.loads(st.secrets["google"]["client_config"])
+                    
+                    # Save config to temporary file
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as config_file:
+                        json.dump(client_config, config_file)
+                        config_file_path = config_file.name
+
+                    try:
+                        # Find available browser
+                        browser_path = self.find_browser()
+                        if not browser_path:
+                            raise RuntimeError("No suitable browser found. Please ensure Chrome, Firefox, or Edge is installed.")
+
+                        # Create a custom browser opener
+                        def browser_opener(url):
+                            try:
+                                if platform.system().lower() != 'windows':
+                                    subprocess.run([browser_path, url])
+                                else:
+                                    subprocess.run([browser_path, url], shell=True)
+                            except Exception as e:
+                                st.error(f"Failed to open browser: {str(e)}")
+                                st.info(f"Please manually open this URL in your browser: {url}")
+
+                        # Configure the flow with the custom browser opener
+                        flow = InstalledAppFlow.from_client_secrets_file(
+                            config_file_path, 
+                            self.SCOPES,
+                            redirect_uri='http://localhost:0'
+                        )
+                        flow.run_local_server(
+                            port=0,
+                            browser_opener=browser_opener,
+                            timeout_seconds=300
+                        )
+                        creds = flow.credentials
+
+                        # Save the credentials
+                        with open('token.json', 'w') as token:
+                            token.write(creds.to_json())
+
+                    finally:
+                        # Clean up temporary config file
+                        os.unlink(config_file_path)
+
+            return creds
+
+        except Exception as e:
+            st.error(f"Authentication failed: {str(e)}")
+            st.info("If the browser didn't open automatically, please check if you have a web browser installed and try again.")
+            raise
     
     def create_message_with_attachments(self, to, html_content, image_paths, subject):
         message = MIMEMultipart()
@@ -178,8 +262,15 @@ class StreamlitEmailComposer:
             # Save current content
             self.save_content(content, subject)
             
-            # Authenticate Gmail
+            # Show authentication message
+            st.info("Please authenticate with Google when the browser window opens...")
+            
+            # Authenticate Gmail with enhanced error handling
             creds = self.authenticate_gmail()
+            if not creds:
+                st.error("Authentication failed. Please try again.")
+                return
+                
             service = build('gmail', 'v1', credentials=creds)
             
             # Create progress bar
@@ -232,6 +323,7 @@ class StreamlitEmailComposer:
             
         except Exception as e:
             st.error(f"Failed to send emails: {str(e)}")
+            st.info("If you're having authentication issues, try clearing your browser cache and cookies, then try again.")
     
     def save_content(self, content, subject):
         try:
