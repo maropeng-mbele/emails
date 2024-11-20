@@ -4,6 +4,7 @@ token.json
 list.csv
 image_mappings.json
 weekly_digest.txt
+secrets.toml
 
 # Python
 __pycache__/
