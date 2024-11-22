@@ -151,50 +151,79 @@ class EmailComposerAndSender:
                     flow = InstalledAppFlow.from_client_secrets_file(
                         client_secrets_file,
                         self.SCOPES,
-                        redirect_uri="http://localhost:8501/"
+                        redirect_uri="http://localhost:8501"
                     )
                     
-                    if 'auth_url' not in st.session_state:
-                        auth_url, _ = flow.authorization_url(
-                            access_type='offline',
-                            include_granted_scopes='true'
-                        )
-                        st.session_state.auth_url = auth_url
+                    # Generate authorization URL
+                    auth_url, _ = flow.authorization_url(
+                        access_type='offline',
+                        include_granted_scopes='true'
+                    )
                     
                     # Show the authorization URL to the user
                     st.markdown("""
                         ### Gmail Authentication Steps:
                         1. Click the link below to authorize
                         2. After authorizing, copy the **entire URL** from your browser's address bar
-                        3. Paste the full URL below
-                        4. Click the 'Complete Authentication' button
+                        3. Paste the full URL below and click the 'Process Authentication' button
                     """)
                     
-                    st.markdown(f"[Click here to authorize]({st.session_state.auth_url})")
+                    st.markdown(f"[Click here to authorize]({auth_url})")
                     
-                    # Get the full redirect URL from the user
-                    redirect_response = st.text_input(
-                        "Paste the full URL here:",
-                        help="Copy and paste the entire URL from your browser after authorization"
-                    )
+                    # Create two columns for input and button
+                    col1, col2 = st.columns([3, 1])
                     
-                    # Add a button to complete authentication
-                    if st.button("Complete Authentication") and redirect_response:
+                    with col1:
+                        redirect_response = st.text_input(
+                            "Paste the full URL here:",
+                            help="Copy and paste the entire URL from your browser after authorization",
+                            key="redirect_url"
+                        )
+                    
+                    with col2:
+                        process_button = st.button("Process Authentication")
+                    
+                    # Add a debug expander
+                    with st.expander("Debug Information"):
+                        if redirect_response:
+                            st.write("Received URL:", redirect_response)
+                            try:
+                                from urllib.parse import urlparse, parse_qs
+                                parsed = urlparse(redirect_response)
+                                query_params = parse_qs(parsed.query)
+                                st.write("Parsed Parameters:", query_params)
+                                if 'code' in query_params:
+                                    st.write("Authentication code found!")
+                                else:
+                                    st.write("No authentication code found in URL")
+                            except Exception as e:
+                                st.write("Error parsing URL:", str(e))
+                    
+                    if redirect_response and process_button:
                         try:
                             # Extract the authorization code from the URL
                             from urllib.parse import urlparse, parse_qs
                             parsed = urlparse(redirect_response)
                             code = parse_qs(parsed.query)['code'][0]
                             
+                            st.info("Attempting to exchange code for credentials...")
+                            
                             # Exchange code for credentials
                             flow.fetch_token(code=code)
                             creds = flow.credentials
                             st.session_state.token = json.loads(creds.to_json())
                             st.success("Successfully authenticated!")
+                            
+                            # Show credential information
+                            st.write("Credentials received:", bool(creds))
+                            st.write("Token saved to session:", bool(st.session_state.token))
+                            
+                            # Force a rerun to update the UI
                             st.experimental_rerun()
                         except Exception as e:
                             st.error(f"Failed to process authentication: {str(e)}")
                             st.error("Please make sure you copied the entire URL including the 'code' parameter")
+                            st.error("Detailed error:", str(e))
                     
                     return None
                     
