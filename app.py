@@ -139,7 +139,7 @@ class EmailComposerAndSender:
                             "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
                             "client_secret": st.secrets.google["client_secret"],
                             "redirect_uris": [
-                                "http://localhost:8501/",  # Note the trailing slash
+                                "http://localhost:8501/",
                                 "http://localhost:8501"
                             ]
                         }
@@ -151,24 +151,26 @@ class EmailComposerAndSender:
                     flow = InstalledAppFlow.from_client_secrets_file(
                         client_secrets_file,
                         self.SCOPES,
-                        redirect_uri="http://localhost:8501/"  # Using the slash version
+                        redirect_uri="http://localhost:8501/"
                     )
                     
-                    # Generate authorization URL
-                    auth_url, _ = flow.authorization_url(
-                        access_type='offline',
-                        include_granted_scopes='true'
-                    )
+                    if 'auth_url' not in st.session_state:
+                        auth_url, _ = flow.authorization_url(
+                            access_type='offline',
+                            include_granted_scopes='true'
+                        )
+                        st.session_state.auth_url = auth_url
                     
                     # Show the authorization URL to the user
                     st.markdown("""
                         ### Gmail Authentication Steps:
                         1. Click the link below to authorize
                         2. After authorizing, copy the **entire URL** from your browser's address bar
-                        3. Paste the full URL below (including the 'code' parameter)
+                        3. Paste the full URL below
+                        4. Click the 'Complete Authentication' button
                     """)
                     
-                    st.markdown(f"[Click here to authorize]({auth_url})")
+                    st.markdown(f"[Click here to authorize]({st.session_state.auth_url})")
                     
                     # Get the full redirect URL from the user
                     redirect_response = st.text_input(
@@ -176,7 +178,8 @@ class EmailComposerAndSender:
                         help="Copy and paste the entire URL from your browser after authorization"
                     )
                     
-                    if redirect_response:
+                    # Add a button to complete authentication
+                    if st.button("Complete Authentication") and redirect_response:
                         try:
                             # Extract the authorization code from the URL
                             from urllib.parse import urlparse, parse_qs
