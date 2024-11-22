@@ -138,7 +138,10 @@ class EmailComposerAndSender:
                             "token_uri": "https://oauth2.googleapis.com/token",
                             "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
                             "client_secret": st.secrets.google["client_secret"],
-                            "redirect_uris": ["http://localhost:8501"]  # Changed to match actual redirect
+                            "redirect_uris": [
+                                "http://localhost:8501/",  # Note the trailing slash
+                                "http://localhost:8501"
+                            ]
                         }
                     }
                     json.dump(client_config, f)
@@ -148,14 +151,13 @@ class EmailComposerAndSender:
                     flow = InstalledAppFlow.from_client_secrets_file(
                         client_secrets_file,
                         self.SCOPES,
-                        redirect_uri="http://localhost:8501"  # Changed to match actual redirect
+                        redirect_uri="http://localhost:8501/"  # Using the slash version
                     )
                     
                     # Generate authorization URL
                     auth_url, _ = flow.authorization_url(
                         access_type='offline',
-                        include_granted_scopes='true',
-                        prompt='consent'
+                        include_granted_scopes='true'
                     )
                     
                     # Show the authorization URL to the user
