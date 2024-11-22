@@ -128,27 +128,34 @@ class EmailComposerAndSender:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
             else:
-                # Get client config from Streamlit secrets
-                client_config = {
-                    "installed": {
-                        "client_id": st.secrets.google["client_id"],
-                        "project_id": st.secrets.google["project_id"],
-                        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                        "token_uri": "https://oauth2.googleapis.com/token",
-                        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-                        "client_secret": st.secrets.google["client_secret"],
-                        "redirect_uris": ["http://localhost"]
+                # Create a temporary JSON file with client secrets
+                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as f:
+                    client_config = {
+                        "installed": {
+                            "client_id": st.secrets.google["client_id"],
+                            "project_id": st.secrets.google["project_id"],
+                            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                            "token_uri": "https://oauth2.googleapis.com/token",
+                            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+                            "client_secret": st.secrets.google["client_secret"],
+                            "redirect_uris": ["http://localhost"]
+                        }
                     }
-                }
-                
-                flow = InstalledAppFlow.from_client_secrets_dict(
-                    client_config, 
-                    self.SCOPES
-                )
-                creds = flow.run_local_server(port=0)
-                
-                # Store token in session state instead of file
-                st.session_state.token = json.loads(creds.to_json())
+                    json.dump(client_config, f)
+                    client_secrets_file = f.name
+
+                try:
+                    flow = InstalledAppFlow.from_client_secrets_file(
+                        client_secrets_file, 
+                        self.SCOPES
+                    )
+                    creds = flow.run_local_server(port=0)
+                    
+                    # Store token in session state instead of file
+                    st.session_state.token = json.loads(creds.to_json())
+                finally:
+                    # Clean up the temporary file
+                    os.unlink(client_secrets_file)
         
         return creds
         
