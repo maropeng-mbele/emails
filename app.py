@@ -131,14 +131,15 @@ class EmailComposerAndSender:
                 # Create a temporary JSON file with client secrets
                 with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as f:
                     client_config = {
-                        "installed": {
+                        "web": {  # Changed from "installed" to "web"
                             "client_id": st.secrets.google["client_id"],
                             "project_id": st.secrets.google["project_id"],
                             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                             "token_uri": "https://oauth2.googleapis.com/token",
                             "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
                             "client_secret": st.secrets.google["client_secret"],
-                            "redirect_uris": ["http://localhost"]
+                            "redirect_uris": ["http://localhost:8501"],  # Streamlit's default port
+                            "javascript_origins": ["http://localhost:8501"]
                         }
                     }
                     json.dump(client_config, f)
@@ -147,12 +148,35 @@ class EmailComposerAndSender:
                 try:
                     flow = InstalledAppFlow.from_client_secrets_file(
                         client_secrets_file, 
-                        self.SCOPES
+                        self.SCOPES,
+                        redirect_uri="http://localhost:8501"  # Explicitly set redirect URI
                     )
-                    creds = flow.run_local_server(port=0)
                     
-                    # Store token in session state instead of file
-                    st.session_state.token = json.loads(creds.to_json())
+                    # Generate authorization URL
+                    auth_url, _ = flow.authorization_url(prompt='consent')
+                    
+                    # Show the authorization URL to the user
+                    st.markdown(f"""
+                        Please click the link below to authorize the application:
+                        
+                        [Click here to authorize]({auth_url})
+                    """)
+                    
+                    # Add input for the authorization code
+                    auth_code = st.text_input("Enter the authorization code:", type="password")
+                    
+                    if auth_code:
+                        try:
+                            flow.fetch_token(code=auth_code)
+                            creds = flow.credentials
+                            st.session_state.token = json.loads(creds.to_json())
+                            st.success("Successfully authenticated!")
+                            st.experimental_rerun()
+                        except Exception as e:
+                            st.error(f"Authentication failed: {str(e)}")
+                    
+                    return None  # Return None if we're still waiting for authentication
+                    
                 finally:
                     # Clean up the temporary file
                     os.unlink(client_secrets_file)
@@ -187,6 +211,10 @@ class EmailComposerAndSender:
             
             # Authenticate Gmail
             creds = self.authenticate_gmail()
+            if not creds:
+                st.info("Please complete the authentication process above before sending emails.")
+                return
+                
             service = build('gmail', 'v1', credentials=creds)
             
             # Create progress bar
@@ -212,7 +240,7 @@ class EmailComposerAndSender:
                     
                     html_content = self.construct_html(recipient_name)
                     image_paths = [st.session_state.images[img_id] 
-                                 for img_id in st.session_state.images]
+                                for img_id in st.session_state.images]
                     
                     message = self.create_message_with_attachments(
                         row['Emails'], html_content, image_paths)
