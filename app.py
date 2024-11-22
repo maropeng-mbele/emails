@@ -131,15 +131,14 @@ class EmailComposerAndSender:
                 # Create a temporary JSON file with client secrets
                 with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as f:
                     client_config = {
-                        "web": {  # Changed from "installed" to "web"
+                        "web": {
                             "client_id": st.secrets.google["client_id"],
                             "project_id": st.secrets.google["project_id"],
                             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                             "token_uri": "https://oauth2.googleapis.com/token",
                             "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
                             "client_secret": st.secrets.google["client_secret"],
-                            "redirect_uris": ["http://localhost:8501"],  # Streamlit's default port
-                            "javascript_origins": ["http://localhost:8501"]
+                            "redirect_uris": ["http://127.0.0.1:8501"]  # Changed to use 127.0.0.1
                         }
                     }
                     json.dump(client_config, f)
@@ -147,27 +146,45 @@ class EmailComposerAndSender:
 
                 try:
                     flow = InstalledAppFlow.from_client_secrets_file(
-                        client_secrets_file, 
+                        client_secrets_file,
                         self.SCOPES,
-                        redirect_uri="http://localhost:8501"  # Explicitly set redirect URI
+                        redirect_uri="http://127.0.0.1:8501"
                     )
                     
                     # Generate authorization URL
-                    auth_url, _ = flow.authorization_url(prompt='consent')
+                    auth_url, _ = flow.authorization_url(
+                        access_type='offline',
+                        include_granted_scopes='true',
+                        prompt='consent'
+                    )
                     
-                    # Show the authorization URL to the user
-                    st.markdown(f"""
-                        Please click the link below to authorize the application:
-                        
-                        [Click here to authorize]({auth_url})
+                    # Show instructions and auth URL
+                    st.markdown("""
+                        ### Gmail Authentication Steps:
+                        1. Make sure you're running this app using `streamlit run app.py`
+                        2. Click the authorization link below
+                        3. Complete the Google authorization process
+                        4. You'll be redirected back to this app
+                        5. Copy the entire URL from your browser after being redirected
+                        6. Paste the full URL in the text box below
                     """)
                     
-                    # Add input for the authorization code
-                    auth_code = st.text_input("Enter the authorization code:", type="password")
+                    st.markdown(f"[Click here to authorize with Google]({auth_url})")
                     
-                    if auth_code:
+                    redirect_url = st.text_input(
+                        "Paste the full redirect URL here:",
+                        help="After authorizing, copy the entire URL from your browser and paste it here"
+                    )
+                    
+                    if redirect_url:
                         try:
-                            flow.fetch_token(code=auth_code)
+                            # Extract code from redirect URL
+                            from urllib.parse import urlparse, parse_qs
+                            parsed = urlparse(redirect_url)
+                            code = parse_qs(parsed.query)['code'][0]
+                            
+                            # Exchange code for credentials
+                            flow.fetch_token(code=code)
                             creds = flow.credentials
                             st.session_state.token = json.loads(creds.to_json())
                             st.success("Successfully authenticated!")
@@ -175,7 +192,7 @@ class EmailComposerAndSender:
                         except Exception as e:
                             st.error(f"Authentication failed: {str(e)}")
                     
-                    return None  # Return None if we're still waiting for authentication
+                    return None
                     
                 finally:
                     # Clean up the temporary file
