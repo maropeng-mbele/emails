@@ -138,7 +138,7 @@ class EmailComposerAndSender:
                             "token_uri": "https://oauth2.googleapis.com/token",
                             "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
                             "client_secret": st.secrets.google["client_secret"],
-                            "redirect_uris": ["http://127.0.0.1:8501"]  # Changed to use 127.0.0.1
+                            "redirect_uris": ["http://localhost:8501"]  # Changed to match actual redirect
                         }
                     }
                     json.dump(client_config, f)
@@ -148,7 +148,7 @@ class EmailComposerAndSender:
                     flow = InstalledAppFlow.from_client_secrets_file(
                         client_secrets_file,
                         self.SCOPES,
-                        redirect_uri="http://127.0.0.1:8501"
+                        redirect_uri="http://localhost:8501"  # Changed to match actual redirect
                     )
                     
                     # Generate authorization URL
@@ -158,29 +158,27 @@ class EmailComposerAndSender:
                         prompt='consent'
                     )
                     
-                    # Show instructions and auth URL
+                    # Show the authorization URL to the user
                     st.markdown("""
                         ### Gmail Authentication Steps:
-                        1. Make sure you're running this app using `streamlit run app.py`
-                        2. Click the authorization link below
-                        3. Complete the Google authorization process
-                        4. You'll be redirected back to this app
-                        5. Copy the entire URL from your browser after being redirected
-                        6. Paste the full URL in the text box below
+                        1. Click the link below to authorize
+                        2. After authorizing, copy the **entire URL** from your browser's address bar
+                        3. Paste the full URL below (including the 'code' parameter)
                     """)
                     
-                    st.markdown(f"[Click here to authorize with Google]({auth_url})")
+                    st.markdown(f"[Click here to authorize]({auth_url})")
                     
-                    redirect_url = st.text_input(
-                        "Paste the full redirect URL here:",
-                        help="After authorizing, copy the entire URL from your browser and paste it here"
+                    # Get the full redirect URL from the user
+                    redirect_response = st.text_input(
+                        "Paste the full URL here:",
+                        help="Copy and paste the entire URL from your browser after authorization"
                     )
                     
-                    if redirect_url:
+                    if redirect_response:
                         try:
-                            # Extract code from redirect URL
+                            # Extract the authorization code from the URL
                             from urllib.parse import urlparse, parse_qs
-                            parsed = urlparse(redirect_url)
+                            parsed = urlparse(redirect_response)
                             code = parse_qs(parsed.query)['code'][0]
                             
                             # Exchange code for credentials
@@ -190,7 +188,8 @@ class EmailComposerAndSender:
                             st.success("Successfully authenticated!")
                             st.experimental_rerun()
                         except Exception as e:
-                            st.error(f"Authentication failed: {str(e)}")
+                            st.error(f"Failed to process authentication: {str(e)}")
+                            st.error("Please make sure you copied the entire URL including the 'code' parameter")
                     
                     return None
                     
