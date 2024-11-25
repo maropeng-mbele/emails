@@ -5,6 +5,7 @@ list.csv
 image_mappings.json
 weekly_digest.txt
 .streamlit/secrets.toml
+token.pickle
 
 # Python
 __pycache__/

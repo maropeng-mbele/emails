@@ -120,7 +120,7 @@ class EmailComposerAndSender:
             st.session_state.content = f"[{image_id}]\n"
             
     def authenticate_gmail(self):
-        """Modified authentication flow for Streamlit"""
+        """Modified authentication flow for Streamlit using secrets"""
         creds = None
         
         # Try to load credentials from session state first
@@ -145,7 +145,7 @@ class EmailComposerAndSender:
         # If no valid credentials exist, start OAuth flow
         if not creds:
             try:
-                # Create client config dictionary
+                # Create client config dictionary from secrets
                 client_config = {
                     "web": {
                         "client_id": st.secrets.google["client_id"],
@@ -158,13 +158,9 @@ class EmailComposerAndSender:
                     }
                 }
                 
-                # Save client config to temporary file
-                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as f:
-                    json.dump(client_config, f)
-                    client_secrets_file = f.name
-
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    client_secrets_file,
+                # Create flow using client config dictionary
+                flow = InstalledAppFlow.from_client_config(
+                    client_config,
                     self.SCOPES,
                     redirect_uri="http://localhost:8501"
                 )
@@ -172,48 +168,33 @@ class EmailComposerAndSender:
                 # Generate authorization URL
                 auth_url, _ = flow.authorization_url(
                     access_type='offline',
-                    include_granted_scopes='true',
-                    prompt='consent'  # Force prompt to ensure refresh token
+                    include_granted_scopes='true'
                 )
                 
                 # Display authentication instructions
                 st.markdown("""
                     ### Gmail Authentication Steps:
-                    1. Click the link below to authorize
-                    2. After authorizing, you will be redirected to a page that may show an error - this is expected
-                    3. Copy the **full URL** from your browser's address bar after being redirected
-                    4. Paste that URL below
+                    1. Make sure this Streamlit app is running on port 8501
+                    2. Click the link below to authorize
+                    3. After authorizing, you'll be redirected back to this app
+                    4. If you see a "This site can't be reached" error, copy the full URL and paste it below
                 """)
                 
                 st.markdown(f"[Click here to authorize]({auth_url})")
                 
-                # Create columns for better layout
-                col1, col2 = st.columns([3, 1])
+                # Get the authorization response
+                authorization_response = st.text_input(
+                    "Paste the full URL here (including http://localhost:8501/?state=...)",
+                    key="auth_response"
+                )
                 
-                with col1:
-                    redirect_response = st.text_input(
-                        "Paste the full redirect URL here:",
-                        help="After authorizing, copy and paste the entire URL from your browser"
-                    )
-                
-                with col2:
-                    process_auth = st.button("Complete Authentication")
-                
-                if redirect_response and process_auth:
+                if authorization_response:
                     try:
-                        # Extract the authorization code from the URL
-                        from urllib.parse import urlparse, parse_qs
-                        parsed = urlparse(redirect_response)
-                        code = parse_qs(parsed.query)['code'][0]
-                        
-                        # Exchange code for credentials
-                        flow.fetch_token(code=code)
+                        flow.fetch_token(authorization_response=authorization_response)
                         creds = flow.credentials
                         
-                        # Save credentials to session state
+                        # Save credentials
                         st.session_state.credentials = creds
-                        
-                        # Save credentials to pickle file
                         with open('token.pickle', 'wb') as token:
                             pickle.dump(creds, token)
                             
@@ -222,12 +203,9 @@ class EmailComposerAndSender:
                         
                     except Exception as e:
                         st.error(f"Authentication failed: {str(e)}")
-                        st.error("Please make sure you copied the entire URL including the 'code' parameter")
+                        st.error("Please make sure you copied the entire URL including the 'state' and 'code' parameters")
                         return None
-                
-                # Clean up temporary file
-                os.unlink(client_secrets_file)
-                
+                    
             except Exception as e:
                 st.error(f"Failed to start authentication flow: {str(e)}")
                 return None
