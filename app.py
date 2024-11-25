@@ -15,6 +15,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 import tempfile
+import pickle
 
 class EmailComposerAndSender:
     def __init__(self):
@@ -37,7 +38,9 @@ class EmailComposerAndSender:
         if 'content' not in st.session_state:
             st.session_state.content = ""
         if 'subject' not in st.session_state:
-            st.session_state.subject = "Hypebeast Weekly Digest"
+            st.session_state.subject = "Type Subject Here"
+        if 'credentials' not in st.session_state:
+            st.session_state.credentials = None
             
     def create_gui(self):
         st.title("Email Composer and Sender")
@@ -117,120 +120,118 @@ class EmailComposerAndSender:
             st.session_state.content = f"[{image_id}]\n"
             
     def authenticate_gmail(self):
+        """Modified authentication flow for Streamlit"""
         creds = None
-        if 'token' in st.session_state:
-            creds = Credentials.from_authorized_user_info(
-                st.session_state.token, 
-                self.SCOPES
-            )
         
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
+        # Try to load credentials from session state first
+        if st.session_state.credentials:
+            creds = st.session_state.credentials
+            
+        # Try to load credentials from pickle file
+        elif os.path.exists('token.pickle'):
+            with open('token.pickle', 'rb') as token:
+                creds = pickle.load(token)
+        
+        # If credentials exist but are invalid or expired
+        if creds and not creds.valid:
+            if creds.expired and creds.refresh_token:
+                try:
+                    creds.refresh(Request())
+                except Exception:
+                    creds = None
             else:
-                # Create a temporary JSON file with client secrets
-                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as f:
-                    client_config = {
-                        "web": {
-                            "client_id": st.secrets.google["client_id"],
-                            "project_id": st.secrets.google["project_id"],
-                            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                            "token_uri": "https://oauth2.googleapis.com/token",
-                            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-                            "client_secret": st.secrets.google["client_secret"],
-                            "redirect_uris": [
-                                "http://localhost:8501/",
-                                "http://localhost:8501"
-                            ]
-                        }
+                creds = None
+                
+        # If no valid credentials exist, start OAuth flow
+        if not creds:
+            try:
+                # Create client config dictionary
+                client_config = {
+                    "web": {
+                        "client_id": st.secrets.google["client_id"],
+                        "project_id": st.secrets.google["project_id"],
+                        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                        "token_uri": "https://oauth2.googleapis.com/token",
+                        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+                        "client_secret": st.secrets.google["client_secret"],
+                        "redirect_uris": ["http://localhost:8501"]
                     }
+                }
+                
+                # Save client config to temporary file
+                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as f:
                     json.dump(client_config, f)
                     client_secrets_file = f.name
 
-                try:
-                    flow = InstalledAppFlow.from_client_secrets_file(
-                        client_secrets_file,
-                        self.SCOPES,
-                        redirect_uri="http://localhost:8501"
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    client_secrets_file,
+                    self.SCOPES,
+                    redirect_uri="http://localhost:8501"
+                )
+                
+                # Generate authorization URL
+                auth_url, _ = flow.authorization_url(
+                    access_type='offline',
+                    include_granted_scopes='true',
+                    prompt='consent'  # Force prompt to ensure refresh token
+                )
+                
+                # Display authentication instructions
+                st.markdown("""
+                    ### Gmail Authentication Steps:
+                    1. Click the link below to authorize
+                    2. After authorizing, you will be redirected to a page that may show an error - this is expected
+                    3. Copy the **full URL** from your browser's address bar after being redirected
+                    4. Paste that URL below
+                """)
+                
+                st.markdown(f"[Click here to authorize]({auth_url})")
+                
+                # Create columns for better layout
+                col1, col2 = st.columns([3, 1])
+                
+                with col1:
+                    redirect_response = st.text_input(
+                        "Paste the full redirect URL here:",
+                        help="After authorizing, copy and paste the entire URL from your browser"
                     )
-                    
-                    # Generate authorization URL
-                    auth_url, _ = flow.authorization_url(
-                        access_type='offline',
-                        include_granted_scopes='true'
-                    )
-                    
-                    # Show the authorization URL to the user
-                    st.markdown("""
-                        ### Gmail Authentication Steps:
-                        1. Click the link below to authorize
-                        2. After authorizing, copy the **entire URL** from your browser's address bar
-                        3. Paste the full URL below and click the 'Process Authentication' button
-                    """)
-                    
-                    st.markdown(f"[Click here to authorize]({auth_url})")
-                    
-                    # Create two columns for input and button
-                    col1, col2 = st.columns([3, 1])
-                    
-                    with col1:
-                        redirect_response = st.text_input(
-                            "Paste the full URL here:",
-                            help="Copy and paste the entire URL from your browser after authorization",
-                            key="redirect_url"
-                        )
-                    
-                    with col2:
-                        process_button = st.button("Process Authentication")
-                    
-                    # Add a debug expander
-                    with st.expander("Debug Information"):
-                        if redirect_response:
-                            st.write("Received URL:", redirect_response)
-                            try:
-                                from urllib.parse import urlparse, parse_qs
-                                parsed = urlparse(redirect_response)
-                                query_params = parse_qs(parsed.query)
-                                st.write("Parsed Parameters:", query_params)
-                                if 'code' in query_params:
-                                    st.write("Authentication code found!")
-                                else:
-                                    st.write("No authentication code found in URL")
-                            except Exception as e:
-                                st.write("Error parsing URL:", str(e))
-                    
-                    if redirect_response and process_button:
-                        try:
-                            # Extract the authorization code from the URL
-                            from urllib.parse import urlparse, parse_qs
-                            parsed = urlparse(redirect_response)
-                            code = parse_qs(parsed.query)['code'][0]
+                
+                with col2:
+                    process_auth = st.button("Complete Authentication")
+                
+                if redirect_response and process_auth:
+                    try:
+                        # Extract the authorization code from the URL
+                        from urllib.parse import urlparse, parse_qs
+                        parsed = urlparse(redirect_response)
+                        code = parse_qs(parsed.query)['code'][0]
+                        
+                        # Exchange code for credentials
+                        flow.fetch_token(code=code)
+                        creds = flow.credentials
+                        
+                        # Save credentials to session state
+                        st.session_state.credentials = creds
+                        
+                        # Save credentials to pickle file
+                        with open('token.pickle', 'wb') as token:
+                            pickle.dump(creds, token)
                             
-                            st.info("Attempting to exchange code for credentials...")
-                            
-                            # Exchange code for credentials
-                            flow.fetch_token(code=code)
-                            creds = flow.credentials
-                            st.session_state.token = json.loads(creds.to_json())
-                            st.success("Successfully authenticated!")
-                            
-                            # Show credential information
-                            st.write("Credentials received:", bool(creds))
-                            st.write("Token saved to session:", bool(st.session_state.token))
-                            
-                            # Force a rerun to update the UI
-                            st.experimental_rerun()
-                        except Exception as e:
-                            st.error(f"Failed to process authentication: {str(e)}")
-                            st.error("Please make sure you copied the entire URL including the 'code' parameter")
-                            st.error("Detailed error:", str(e))
-                    
-                    return None
-                    
-                finally:
-                    # Clean up the temporary file
-                    os.unlink(client_secrets_file)
-        
+                        st.success("Successfully authenticated!")
+                        st.experimental_rerun()
+                        
+                    except Exception as e:
+                        st.error(f"Authentication failed: {str(e)}")
+                        st.error("Please make sure you copied the entire URL including the 'code' parameter")
+                        return None
+                
+                # Clean up temporary file
+                os.unlink(client_secrets_file)
+                
+            except Exception as e:
+                st.error(f"Failed to start authentication flow: {str(e)}")
+                return None
+                
         return creds
         
     def create_message_with_attachments(self, to, html_content, image_paths):
