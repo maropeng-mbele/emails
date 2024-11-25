@@ -178,23 +178,38 @@ class EmailComposerAndSender:
                     2. Click the link below to authorize
                     3. After authorizing, you'll be redirected back to this app
                     4. If you see a "This site can't be reached" error, copy the full URL and paste it below
+                    5. Click the 'Complete Authentication' button
                 """)
                 
                 st.markdown(f"[Click here to authorize]({auth_url})")
                 
-                # Get the authorization response
-                authorization_response = st.text_input(
-                    "Paste the full URL here (including http://localhost:8501/?state=...)",
-                    key="auth_response"
-                )
+                # Create columns for better layout
+                col1, col2 = st.columns([3, 1])
                 
-                if authorization_response:
+                with col1:
+                    authorization_response = st.text_input(
+                        "Paste the full redirect URL here:",
+                        help="After authorizing, copy and paste the entire URL from your browser"
+                    )
+                
+                with col2:
+                    process_auth = st.button("Complete Authentication")
+                
+                if authorization_response and process_auth:
                     try:
-                        flow.fetch_token(authorization_response=authorization_response)
+                        # Extract the authorization code from the URL
+                        from urllib.parse import urlparse, parse_qs
+                        parsed = urlparse(authorization_response)
+                        code = parse_qs(parsed.query)['code'][0]
+                        
+                        # Exchange code for credentials
+                        flow.fetch_token(code=code)
                         creds = flow.credentials
                         
-                        # Save credentials
+                        # Save credentials to session state
                         st.session_state.credentials = creds
+                        
+                        # Save credentials to pickle file
                         with open('token.pickle', 'wb') as token:
                             pickle.dump(creds, token)
                             
@@ -203,7 +218,7 @@ class EmailComposerAndSender:
                         
                     except Exception as e:
                         st.error(f"Authentication failed: {str(e)}")
-                        st.error("Please make sure you copied the entire URL including the 'state' and 'code' parameters")
+                        st.error("Please make sure you copied the entire URL including the 'code' parameter")
                         return None
                     
             except Exception as e:
@@ -241,7 +256,7 @@ class EmailComposerAndSender:
             # Authenticate Gmail
             creds = self.authenticate_gmail()
             if not creds:
-                st.info("Please complete the authentication process above before sending emails.")
+                st.warning("Please complete the authentication process first.")
                 return
                 
             service = build('gmail', 'v1', credentials=creds)
@@ -287,7 +302,6 @@ class EmailComposerAndSender:
                         
             # Make backup and cleanup
             self.make_backup()
-            self.delete_token_file()
             
             st.success(f"Successfully sent emails to {sent_count} recipients!")
             
